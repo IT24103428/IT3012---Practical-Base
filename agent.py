@@ -2,6 +2,8 @@ from collections import deque
 import heapq
 import math
 
+from logic_engine import KnowledgeBase
+
 
 class GreedyGridAgent:
     """Original Lab 01-style agent kept for compatibility."""
@@ -228,6 +230,16 @@ class SearchAgent:
         self.estimated_position = [0, 0]
         self.last_action = None
 
+        self.kb = KnowledgeBase()
+        self.kb.tell_rule(
+            ['TargetVisible', 'HasDust'],
+            'SafeToEngage'
+        )
+        self.kb.tell_rule(
+            ['SafeToEngage', 'BloodseekerMissing'],
+            'Retreat'
+        )
+
     @staticmethod
     def _normalise_walls(walls):
         return {tuple(wall) for wall in walls}
@@ -407,11 +419,13 @@ class SearchAgent:
         goal_pos,
         walls,
         grid_size,
-        heuristic_type='manhattan'
+        heuristic_type='manhattan',
+        tile_facts=None
     ):
         """A* Search using f(n) = g(n) + h(n)."""
 
         walls = self._normalise_walls(walls)
+        tile_facts = tile_facts or {}
         start = tuple(start_pos)
         goal = tuple(goal_pos)
 
@@ -454,6 +468,14 @@ class SearchAgent:
                 if next_position is None or next_position in reached_states:
                     continue
 
+                self.kb.clear_facts()
+                for fact in tile_facts.get(next_position, []):
+                    self.kb.tell_fact(fact)
+                self.kb.forward_chain()
+
+                if 'Retreat' in self.kb.facts:
+                    continue
+
                 new_g = g_cost + 1
                 new_h = heuristic(next_position, goal)
                 new_f = new_g + new_h
@@ -465,7 +487,7 @@ class SearchAgent:
 
         return None
 
-    def _search(self, start_pos, goal_pos, walls, grid_size):
+    def _search(self, start_pos, goal_pos, walls, grid_size, tile_facts=None):
         """Run the search algorithm selected by active_algo."""
         if self.active_algo == 'DFS':
             return self.dfs_search(
@@ -483,7 +505,8 @@ class SearchAgent:
                 goal_pos,
                 walls,
                 grid_size,
-                heuristic_type='manhattan'
+                heuristic_type='manhattan',
+                tile_facts=tile_facts
             )
 
         # Default required by the practical.
@@ -520,6 +543,10 @@ class SearchAgent:
         self._update_estimated_position(percept)
 
         if not self.plan:
+            tile_facts = {
+                (1, 0): ['TargetVisible', 'HasDust', 'BloodseekerMissing'],
+                (0, 1): ['TargetVisible', 'HasDust'],
+            }
             all_food = [
                 tuple(food)
                 for food in percept.get('all_food', [])
@@ -544,7 +571,8 @@ class SearchAgent:
                 start,
                 goal,
                 percept.get('walls', []),
-                percept.get('grid_size', (0, 0))
+                percept.get('grid_size', (0, 0)),
+                tile_facts=tile_facts
             ) or []
 
         if self.plan:
